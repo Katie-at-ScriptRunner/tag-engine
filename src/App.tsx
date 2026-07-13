@@ -733,7 +733,8 @@ Only use [[...]] for selectable choices.`
 // holds the Anthropic API key safely on the server side and forwards the
 // conversation to Claude. The browser never sees the API key.
 
-const ADA_ENDPOINT = '/.netlify/functions/ada'
+// TODO: replace with real ScriptRunner Connect endpoint URL
+const ADA_ENDPOINT = 'PLACEHOLDER_SRCONNECT_URL'
 
 async function callAda(messages: { role: 'user' | 'assistant' | 'system'; content: string }[]): Promise<string> {
   const res = await fetch(ADA_ENDPOINT, {
@@ -745,6 +746,7 @@ async function callAda(messages: { role: 'user' | 'assistant' | 'system'; conten
     throw new Error(`Ada request failed (${res.status})`)
   }
   const data = await res.json()
+  // NOTE: response parsing assumes data.text — may need adjusting once we see SRConnect's real response shape
   return data.text as string
 }
 
