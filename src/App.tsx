@@ -715,6 +715,9 @@ PRODUCTS (only recommend those compatible with stated platform and deployment):
 - ScriptRunner Enhanced Search — advanced search and filtering beyond native JQL
 - Mosaic (Cloud & Data Center) — formatting, layouts, branded templates for Confluence. Advanced Mosaic for complex design systems.
 - Hierarchy for Jira (Cloud only) — multi-level issue hierarchy visualisation
+- Upscale — everyday work apps for Jira, monday.com, and Slack (e.g. Hierarchy for Jira, task automation, notifications)
+- Salable — all-in-one SaaS licensing platform for generating licenses, managing subscriptions, and payments
+- Brew Digital — full-service B2B digital agency: branding, websites, digital marketing, app development, and Confluence theming
 
 Always say "Mosaic" not "Kolekti". Never recommend tools outside The Adaptavist Group. Never fabricate capabilities.
 
