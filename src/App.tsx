@@ -42,7 +42,14 @@ const LANG_LABEL: Record<string,string> = {groovy:'Groovy Script',javascript:'Ja
 function inferTitle(lang: string, code: string): string {
   const m = code.match(/Purpose:\s*([^\n*]+)/)
   if (m) return m[1].replace(/[*]/g,'').trim()
-  return LANG_LABEL[lang.toLowerCase()] || 'Script'
+
+  const heading = code.match(/^#{1,6}\s+(.+)$/m)
+  const fallbackSource = heading
+    ? heading[1].trim()
+    : (code.replace(/^\s*(\/\/|#|\/\*|\*)+\s*/gm, '').match(/[^.!?\n]+[.!?]?/)?.[0] ?? '').trim()
+
+  if (!fallbackSource) return LANG_LABEL[lang.toLowerCase()] || 'Script'
+  return fallbackSource.length > 60 ? fallbackSource.slice(0, 57).trim() + '…' : fallbackSource
 }
 function langExt(lang: string): string { return LANG_EXT[lang.toLowerCase()] || 'txt' }
 function isCode(lang: string): boolean { return CODE_LANGS.has(lang.toLowerCase()) }
@@ -748,6 +755,8 @@ Rules for documents:
 - Limit to 6–8 sections maximum — this is a one-pager, not a report
 - Use the role context to determine tone and content emphasis
 - Always include a "Get in Touch" section with the contact URL
+
+TITLING: Every script or document must open with a specific, descriptive title reflecting exactly what it does, not a generic label. For scripts, the Purpose: line in the header comment must name the actual function (e.g. "Auto-transition issues on sprint close for ScriptRunner Cloud", not "Automation Script"). For documents, the # Title must reflect the specific recommendation or challenge discussed (e.g. "Mosaic Rollout Plan for Messy Confluence Pages", not "One-Pager").
 
 INTERACTIVE OPTIONS: End every response with 2–3 follow-up choices in [[double brackets]] on their own lines after all content. Pick options appropriate to the role and topic.
 
