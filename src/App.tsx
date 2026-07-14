@@ -348,8 +348,8 @@ function SelectionCard({ label, description, selected, onClick }: { label: strin
   )
 }
 
-function AdaMessage({ content, isLast, isLoading, hasArtifact, onOption, onOpenArtifact }: { content: string; isLast: boolean; isLoading: boolean; hasArtifact: boolean; onOption: (o: string) => void; onOpenArtifact: () => void }) {
-  const { prose, options } = parseMessage(content)
+function AdaMessage({ content, hasArtifact, onOpenArtifact }: { content: string; hasArtifact: boolean; onOpenArtifact: () => void }) {
+  const { prose } = parseMessage(content)
   return (
     <div className="msg-bubble msg-bubble-ada">
       <div className="prose-ada" dangerouslySetInnerHTML={{ __html: renderMarkdown(prose) }}/>
@@ -357,15 +357,6 @@ function AdaMessage({ content, isLast, isLoading, hasArtifact, onOption, onOpenA
         <div className="artifact-notice" onClick={onOpenArtifact} style={{ cursor: 'pointer' }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
           Script ready — view in panel →
-        </div>
-      )}
-      {options.length > 0 && (
-        <div className="option-row">
-          {options.map((opt, i) =>
-            isLast && !isLoading
-              ? <button key={i} className="option-btn" onClick={() => onOption(opt)}>{opt}</button>
-              : <span   key={i} className="option-btn option-btn-used">{opt}</span>
-          )}
         </div>
       )}
     </div>
@@ -743,6 +734,7 @@ RESPONSE RULES:
 4. If the problem is unclear, ask one focused question
 5. If no product fits, say so honestly — mention native Atlassian workarounds and suggest a feature request
 6. Never close with a generic sign-off
+7. When asking a clarifying question with multiple possible interpretations, do not write them as a prose bullet list. Instead, present each interpretation as a [[...]] clickable option, and do not include any additional [[...]] follow-up suggestions in that same response. The options ARE the interpretations, nothing else.
 
 SETUP GUIDES (only when explicitly asked): Numbered steps. For ScriptRunner include a Groovy code block — the UI shows it in a side panel. Script must open with:
 
@@ -798,7 +790,7 @@ Rules for documents:
 
 TITLING: Every script or document must open with a specific, descriptive title reflecting exactly what it does, not a generic label. For scripts, the Purpose: line in the header comment must name the actual function (e.g. "Auto-transition issues on sprint close for ScriptRunner Cloud", not "Automation Script"). For documents, the # Title must reflect the specific recommendation or challenge discussed (e.g. "Mosaic Rollout Plan for Messy Confluence Pages", not "One-Pager").
 
-INTERACTIVE OPTIONS: End every response with 2–3 follow-up choices in [[double brackets]] on their own lines after all content. Pick options appropriate to the role and topic.
+INTERACTIVE OPTIONS: End every response with 2–3 follow-up choices in [[double brackets]] on their own lines after all content. Pick options appropriate to the role and topic. This section (role-based follow-up suggestions) applies only to responses giving a full recommendation or answer, not to clarifying questions. A clarifying question response must contain only interpretation options, nothing from the role-specific suggestion lists below.
 
 Sales: [[What discovery questions should I ask?]] [[How would I build a business case?]] [[Should I loop in a Solution Engineer?]]
 CSM: [[What does a good adoption plan look like?]] [[How should we measure success?]] [[Are there expansion opportunities here?]]
@@ -949,6 +941,7 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
 
   const lastAssistantIdx  = messages.reduce((acc,m,i) => m.role==='assistant' ? i : acc, -1)
   const artifactMsgIdxSet = useMemo(() => new Set(artifacts.map(a=>a.msgIndex)), [artifacts])
+  const lastOptions = (!loading && lastAssistantIdx !== -1) ? parseMessage(messages[lastAssistantIdx].content).options : []
 
   return (
     <div className="results-wrapper">
@@ -970,7 +963,7 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
                 <div key={i} className={`msg-row ${msg.role==='user'?'msg-user':'msg-ada'}`}>
                   {msg.role==='assistant' && <AdaAvatar/>}
                   {msg.role==='assistant'
-                    ? <AdaMessage content={msg.content} isLast={i===lastAssistantIdx} isLoading={loading} hasArtifact={artifactMsgIdxSet.has(i)} onOption={sendMessage}
+                    ? <AdaMessage content={msg.content} hasArtifact={artifactMsgIdxSet.has(i)}
                         onOpenArtifact={() => {
                           const idx = artifacts.findIndex(a => a.msgIndex === i)
                           if (idx !== -1) { setCurrentIdx(idx); setPanelOpen(true) }
@@ -985,8 +978,13 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
             </div>
           </div>
           <div className="followup-bar">
+            {lastOptions.length > 0 && (
+              <div className="followup-options">
+                {lastOptions.map((opt, i) => <button key={i} className="option-btn option-btn-sm" onClick={() => sendMessage(opt)}>{opt}</button>)}
+              </div>
+            )}
             <div className="followup-inner">
-              <textarea className="followup-input" placeholder="Ask Ada a follow-up question…" value={followUp} rows={1} disabled={loading} onChange={e=>setFollowUp(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(followUp)}}}/>
+              <textarea className="followup-input" placeholder="Ask Ada a follow-up question…" value={followUp} rows={2} disabled={loading} onChange={e=>setFollowUp(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(followUp)}}}/>
               <button className={`send-btn ${!followUp.trim()||loading?'send-btn-disabled':''}`} disabled={!followUp.trim()||loading} onClick={()=>sendMessage(followUp)} aria-label="Send">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
