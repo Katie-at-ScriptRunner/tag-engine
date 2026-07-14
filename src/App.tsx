@@ -606,8 +606,8 @@ function PlatformScreen({ onStart }: { onStart: (role: Role, currentProducts: Ad
   const ready = role !== ''
 
   return (
-    <div className="screen-center">
-      <img src={bannerUrl} style={{ width: '100%', borderRadius: 8, marginBottom: '1.5rem' }} alt="TAG Engine"/>
+    <div className="screen-center" style={{ justifyContent: 'flex-start' }}>
+      <img src={bannerUrl} style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 8, marginBottom: '2.5rem' }} alt="TAG Engine"/>
       <h1 className="screen-heading">Hi, I'm Ada and I power TAG Engine.</h1>
       <p className="screen-subtext">Tell me the pain points you're having, and I'll help find the solution.</p>
       <div className="card">
