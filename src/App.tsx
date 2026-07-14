@@ -1,11 +1,22 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import logoUrl from './logo.png'
+import bannerUrl from './Tag_Headline.jpeg'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Product    = 'Jira' | 'Confluence' | 'Both' | 'Unsure'
-type Deployment = 'Cloud' | 'Data Center' | 'Unsure'
 type Screen     = 'platform' | 'problem' | 'results'
+type AdaptavistProduct =
+  | 'ScriptRunner for Jira Cloud'
+  | 'ScriptRunner for Jira Data Center'
+  | 'ScriptRunner for Confluence Cloud'
+  | 'ScriptRunner for Confluence Data Center'
+  | 'ScriptRunner Migration Suite'
+  | 'ScriptRunner Connect'
+  | 'Mosaic for Confluence Cloud'
+  | 'Mosaic for Confluence Data Center'
+  | 'Brew Digital'
+  | 'Upscale'
+  | 'Salable'
 type Role =
   | 'Sales'
   | 'Customer Success Manager'
@@ -25,6 +36,20 @@ const ROLES: Role[] = [
   'Sales','Customer Success Manager','Solution Engineer','Administrator',
   'Technical User','Product Manager','Marketing','Channel Partner',
   'Support Engineer','Executive / Decision Maker',
+]
+
+const CURRENT_PRODUCTS: AdaptavistProduct[] = [
+  'ScriptRunner for Jira Cloud',
+  'ScriptRunner for Jira Data Center',
+  'ScriptRunner for Confluence Cloud',
+  'ScriptRunner for Confluence Data Center',
+  'ScriptRunner Migration Suite',
+  'ScriptRunner Connect',
+  'Mosaic for Confluence Cloud',
+  'Mosaic for Confluence Data Center',
+  'Brew Digital',
+  'Upscale',
+  'Salable',
 ]
 
 const LOADING_PHRASES = [
@@ -245,28 +270,62 @@ function BadgeDropdown({ value, options, onChange, className }: {
   )
 }
 
-function PlatformBadge({ product, deployment, role, onChangeProduct, onChangeDeployment, onChangeRole }: {
-  product: Product; deployment: Deployment; role?: Role | null
-  onChangeProduct?: (v: Product) => void
-  onChangeDeployment?: (v: Deployment) => void
+function PlatformBadge({ role, currentProducts, onChangeRole }: {
+  role?: Role | null; currentProducts?: AdaptavistProduct[]
   onChangeRole?: (v: Role) => void
 }) {
-  const products:    Product[]    = ['Jira','Confluence','Both','Unsure']
-  const deployments: Deployment[] = ['Cloud','Data Center','Unsure']
-
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {onChangeProduct
-        ? <BadgeDropdown value={product} options={products} onChange={v => onChangeProduct(v as Product)} className="badge-product"/>
-        : <span className="badge badge-product">{product}</span>
-      }
-      {onChangeDeployment
-        ? <BadgeDropdown value={deployment} options={deployments} onChange={v => onChangeDeployment(v as Deployment)} className="badge-deploy"/>
-        : <span className="badge badge-deploy">{deployment}</span>
-      }
       {role && (onChangeRole
         ? <BadgeDropdown value={role} options={ROLES} onChange={v => onChangeRole(v as Role)} className="badge-role"/>
         : <span className="badge badge-role">{role}</span>
+      )}
+      {currentProducts && currentProducts.length > 0 && (
+        <span className="badge badge-product">{currentProducts.length} products</span>
+      )}
+    </div>
+  )
+}
+
+function ProductMultiSelect({ value, onChange }: { value: AdaptavistProduct[]; onChange: (v: AdaptavistProduct[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function h(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+
+  function toggle(p: AdaptavistProduct) {
+    onChange(value.includes(p) ? value.filter(x => x !== p) : [...value, p])
+  }
+
+  const label = value.length === 0 ? 'Select any that apply…' : value.length === 1 ? value[0] : `${value.length} products`
+
+  return (
+    <div style={{ position: 'relative' }} ref={ref}>
+      <button type="button" className={`role-select ${value.length ? 'role-select-filled' : ''}`}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', textAlign: 'left' }}
+        onClick={() => setOpen(v => !v)}>
+        <span>{label}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ opacity: .6, flexShrink: 0 }}>
+          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="badge-dropdown" style={{ width: '100%', maxHeight: 260, overflowY: 'auto' }}>
+          {CURRENT_PRODUCTS.map(p => (
+            <button type="button" key={p}
+              className={`badge-dropdown-item ${value.includes(p) ? 'badge-dropdown-item-active' : ''}`}
+              style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}
+              onClick={() => toggle(p)}>
+              <input type="checkbox" checked={value.includes(p)} readOnly style={{ pointerEvents: 'none' }}/>
+              <span>{p}</span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -550,32 +609,19 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
 
 // ── Screen 1 ───────────────────────────────────────────────────────────────
 
-const PRODUCT_CARDS = [
-  { label: 'Jira'       as Product, description: 'Issue tracking, project & workflow management' },
-  { label: 'Confluence' as Product, description: 'Docs, knowledge base & team collaboration' },
-  { label: 'Both'       as Product, description: 'Touches both Jira and Confluence' },
-  { label: 'Unsure'     as Product, description: 'Not sure yet — Ada will help narrow it down' },
-]
-const DEPLOYMENT_CARDS = [
-  { label: 'Cloud'       as Deployment, description: 'Atlassian Cloud — hosted by Atlassian' },
-  { label: 'Data Center' as Deployment, description: 'Self-managed on your own infrastructure' },
-  { label: 'Unsure'      as Deployment, description: 'Not confirmed — Ada will factor in both' },
-]
-
-function PlatformScreen({ onStart }: { onStart: (p: Product, d: Deployment, r: Role) => void }) {
-  const [product,    setProduct]    = useState<Product | null>(null)
-  const [deployment, setDeployment] = useState<Deployment | null>(null)
-  const [role,       setRole]       = useState<Role | ''>('')
-  const ready = product !== null && deployment !== null && role !== ''
+function PlatformScreen({ onStart }: { onStart: (role: Role, currentProducts: AdaptavistProduct[]) => void }) {
+  const [role,            setRole]            = useState<Role | ''>('')
+  const [currentProducts, setCurrentProducts] = useState<AdaptavistProduct[]>([])
+  const ready = role !== ''
 
   return (
     <div className="screen-center">
-      <div className="logo-lockup"><TagLogo size={40}/><div><div className="logo-title">TAG Engine</div><div className="logo-subtitle">Powered by Ada</div></div></div>
-      <h1 className="screen-heading">What platform is this for?</h1>
-      <p className="screen-subtext">Select your role, product and deployment type to get tailored recommendations.</p>
+      <img src={bannerUrl} style={{ width: '100%', borderRadius: 8, marginBottom: '1.5rem' }} alt="TAG Engine"/>
+      <h1 className="screen-heading">Hi, I'm Ada and I power TAG Engine.</h1>
+      <p className="screen-subtext">Tell me the pain points you're having, and I'll help find the solution.</p>
       <div className="card">
         <div className="selector-group">
-          <label className="selector-label" htmlFor="role-select">Your role</label>
+          <label className="selector-label" htmlFor="role-select">But first, can you tell me who you are, or who you're trying to help?</label>
           <div className="role-select-wrapper">
             <select id="role-select" className={`role-select ${role ? 'role-select-filled' : ''}`} value={role} onChange={e => setRole(e.target.value as Role | '')}>
               <option value="">Select your role…</option>
@@ -586,27 +632,19 @@ function PlatformScreen({ onStart }: { onStart: (p: Product, d: Deployment, r: R
         </div>
         <div className="selector-divider"/>
         <div className="selector-group">
-          <label className="selector-label">Product</label>
-          <div className="card-grid">
-            {PRODUCT_CARDS.map(({label,description}) => <SelectionCard key={label} label={label} description={description} selected={product===label} onClick={()=>setProduct(label)}/>)}
-          </div>
-        </div>
-        <div className="selector-divider"/>
-        <div className="selector-group">
-          <label className="selector-label">Deployment</label>
-          <div className="card-grid card-grid-3">
-            {DEPLOYMENT_CARDS.map(({label,description}) => <SelectionCard key={label} label={label} description={description} selected={deployment===label} onClick={()=>setDeployment(label)}/>)}
-          </div>
+          <label className="selector-label">Are you currently using any of the products below?</label>
+          <ProductMultiSelect value={currentProducts} onChange={setCurrentProducts}/>
+          <p className="input-hint" style={{ margin: 0 }}>Optional</p>
         </div>
       </div>
-      <button className={`btn-primary ${!ready?'btn-disabled':''}`} disabled={!ready} onClick={() => ready && onStart(product!, deployment!, role as Role)}>Start →</button>
+      <button className={`btn-primary ${!ready?'btn-disabled':''}`} disabled={!ready} onClick={() => ready && onStart(role as Role, currentProducts)}>Start →</button>
     </div>
   )
 }
 
 // ── Screen 2 ───────────────────────────────────────────────────────────────
 
-function ProblemScreen({ product, deployment, role, onSubmit, onBack }: { product: Product; deployment: Deployment; role: Role; onSubmit: (p: string) => void; onBack: () => void }) {
+function ProblemScreen({ role, currentProducts, onSubmit, onBack }: { role: Role; currentProducts: AdaptavistProduct[]; onSubmit: (p: string) => void; onBack: () => void }) {
   const [problem, setProblem] = useState('')
   const [loading, setLoading] = useState(false)
   const ready = problem.trim().length > 10
@@ -615,7 +653,7 @@ function ProblemScreen({ product, deployment, role, onSubmit, onBack }: { produc
     <div className="screen-center">
       <button onClick={onBack} className="back-btn">← Back</button>
       <div className="logo-lockup logo-lockup-sm"><TagLogo size={28}/><div className="logo-title logo-title-sm">TAG Engine</div></div>
-      <div className="mb-4"><PlatformBadge product={product} deployment={deployment} role={role}/></div>
+      <div className="mb-4"><PlatformBadge role={role} currentProducts={currentProducts}/></div>
       <h2 className="screen-heading">Describe the workflow challenge</h2>
       <p className="screen-subtext">In plain language — Ada will match it to the right Adaptavist product.</p>
       <div className="card card-tight">
@@ -688,6 +726,8 @@ PRODUCTS (only recommend those compatible with stated platform and deployment):
 - Hierarchy for Jira (Cloud only) — multi-level issue hierarchy visualisation
 
 Always say "Mosaic" not "Kolekti". Never recommend tools outside The Adaptavist Group. Never fabricate capabilities.
+
+The user has indicated which Adaptavist products they currently use (see "Currently using" in their message). Take this into account, existing users may need integration, migration, or expansion advice rather than a fresh recommendation.
 
 Knowledge base: docs.adaptavist.com | scriptrunnerhq.com | kolekti.com | upscale.tech
 Contact & support portal: https://www.adaptavist.com/contact — use this link when:
@@ -803,10 +843,8 @@ const DEFAULT_PANEL_WIDTH = 480
 const MIN_CHAT_WIDTH      = 380
 const MIN_PANEL_WIDTH     = 320
 
-function ResultsScreen({ product, deployment, role, initialProblem, onReset, onChangeProduct, onChangeDeployment, onChangeRole }: {
-  product: Product; deployment: Deployment; role: Role; initialProblem: string; onReset: () => void
-  onChangeProduct: (v: Product) => void
-  onChangeDeployment: (v: Deployment) => void
+function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChangeRole }: {
+  role: Role; currentProducts: AdaptavistProduct[]; initialProblem: string; onReset: () => void
   onChangeRole: (v: Role) => void
 }) {
   const [messages,   setMessages]   = useState<Message[]>([])
@@ -844,7 +882,7 @@ function ResultsScreen({ product, deployment, role, initialProblem, onReset, onC
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
   async function run() {
-    const apiMsg = `Role: ${role}\nPlatform: ${product} | Deployment: ${deployment}\n\nWorkflow challenge: ${initialProblem}`
+    const apiMsg = `Role: ${role}\nCurrently using: ${currentProducts.length ? currentProducts.join(', ') : 'None specified'}\n\nWorkflow challenge: ${initialProblem}`
     apiHistoryRef.current = [{ role: 'user', content: apiMsg }]
     setMessages([{ role: 'user', content: initialProblem }])
     await fetchAda()
@@ -873,14 +911,6 @@ function ResultsScreen({ product, deployment, role, initialProblem, onReset, onC
     setFollowUp(''); await fetchAda()
   }
 
-  function handleChangeProduct(v: Product) {
-    onChangeProduct(v)
-    sendContextUpdate(`Context update: the platform product has been changed to ${v}.`)
-  }
-  function handleChangeDeployment(v: Deployment) {
-    onChangeDeployment(v)
-    sendContextUpdate(`Context update: the deployment type has been changed to ${v}.`)
-  }
   function handleChangeRole(v: Role) {
     onChangeRole(v)
     sendContextUpdate(`Context update: the user's role has been changed to ${v}. Please adjust your approach accordingly.`)
@@ -926,9 +956,7 @@ function ResultsScreen({ product, deployment, role, initialProblem, onReset, onC
         <div className="flex items-center gap-3">
           <TagLogo size={28}/>
           <span className="results-title">TAG Engine</span>
-          <PlatformBadge product={product} deployment={deployment} role={role}
-            onChangeProduct={handleChangeProduct}
-            onChangeDeployment={handleChangeDeployment}
+          <PlatformBadge role={role} currentProducts={currentProducts}
             onChangeRole={handleChangeRole}/>
         </div>
         <button onClick={onReset} className="reset-btn">↺ Start over</button>
@@ -988,18 +1016,15 @@ function ResultsScreen({ product, deployment, role, initialProblem, onReset, onC
 // ── Root ───────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [screen,     setScreen]     = useState<Screen>('platform')
-  const [product,    setProduct]    = useState<Product    | null>(null)
-  const [deployment, setDeployment] = useState<Deployment | null>(null)
-  const [role,       setRole]       = useState<Role       | null>(null)
-  const [problem,    setProblem]    = useState<string     | null>(null)
+  const [screen,          setScreen]          = useState<Screen>('platform')
+  const [role,             setRole]            = useState<Role | null>(null)
+  const [currentProducts, setCurrentProducts] = useState<AdaptavistProduct[]>([])
+  const [problem,         setProblem]         = useState<string | null>(null)
 
-  function reset() { setProduct(null); setDeployment(null); setRole(null); setProblem(null); setScreen('platform') }
+  function reset() { setRole(null); setCurrentProducts([]); setProblem(null); setScreen('platform') }
 
-  if (screen==='platform') return <PlatformScreen onStart={(p,d,r)=>{setProduct(p);setDeployment(d);setRole(r);setScreen('problem')}}/>
-  if (screen==='problem')  return <ProblemScreen product={product!} deployment={deployment!} role={role!} onBack={()=>setScreen('platform')} onSubmit={p=>{setProblem(p);setScreen('results')}}/>
-  return <ResultsScreen product={product!} deployment={deployment!} role={role!} initialProblem={problem!} onReset={reset}
-    onChangeProduct={p => setProduct(p)}
-    onChangeDeployment={d => setDeployment(d)}
+  if (screen==='platform') return <PlatformScreen onStart={(r,cp)=>{setRole(r);setCurrentProducts(cp);setScreen('problem')}}/>
+  if (screen==='problem')  return <ProblemScreen role={role!} currentProducts={currentProducts} onBack={()=>setScreen('platform')} onSubmit={p=>{setProblem(p);setScreen('results')}}/>
+  return <ResultsScreen role={role!} currentProducts={currentProducts} initialProblem={problem!} onReset={reset}
     onChangeRole={r => setRole(r)}/>
 }
