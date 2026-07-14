@@ -735,11 +735,20 @@ Only use [[...]] for selectable choices.`
 
 const ADA_ENDPOINT = 'https://event.scriptrunnerconnect.com/ioyk7g6ee2nyqav5xyn7pm'
 
+function getOrCreateUserId(): string {
+  const existing = localStorage.getItem('tagEngineUserId')
+  if (existing) return existing
+  const id = crypto.randomUUID()
+  localStorage.setItem('tagEngineUserId', id)
+  return id
+}
+
 async function callAda(messages: { role: 'user' | 'assistant' | 'system'; content: string }[]): Promise<string> {
+  const userId = getOrCreateUserId()
   const res = await fetch(ADA_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, userId }),
   })
   if (!res.ok) {
     throw new Error(`Ada request failed (${res.status})`)
