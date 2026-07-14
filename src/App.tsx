@@ -942,7 +942,7 @@ function ResultsScreen({ product, deployment, role, initialProblem, onReset, onC
                   }
                 </div>
               ))}
-              {loading && <div className="msg-row msg-ada"><AdaAvatar/><div className="msg-bubble msg-bubble-ada"><LoadingMessage/></div></div>}
+              {loading && <div className="msg-row msg-ada"><AdaAvatar/><LoadingMessage/></div>}
               {error && <div className="error-banner"><span>{error}</span><button className="retry-btn" onClick={retryLast}>Retry</button></div>}
               <div ref={bottomRef}/>
             </div>
