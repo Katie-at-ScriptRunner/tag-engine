@@ -853,6 +853,7 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
   const [isMobile,   setIsMobile]   = useState(() => window.innerWidth < 768)
 
   const bottomRef     = useRef<HTMLDivElement>(null)
+  const lastMsgRef    = useRef<HTMLDivElement>(null)
   const hasInit       = useRef(false)
   const apiHistoryRef = useRef<Message[]>([])
   const prevArtCount  = useRef(0)
@@ -875,7 +876,15 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
   }, [])
 
   useEffect(() => { if (!hasInit.current) { hasInit.current = true; run() } }, [])
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
+  useEffect(() => {
+    if (messages.length === 0) return
+    const lastMsg = messages[messages.length - 1]
+    if (lastMsg.role === 'assistant' && !loading) {
+      lastMsgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages, loading])
 
   async function run() {
     const apiMsg = `Role: ${role}\nCurrently using: ${currentProducts.length ? currentProducts.join(', ') : 'None specified'}\n\nWorkflow challenge: ${initialProblem}`
@@ -964,7 +973,7 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
           <div className="thread-container">
             <div className="thread-inner">
               {messages.map((msg,i) => (
-                <div key={i} className={`msg-row ${msg.role==='user'?'msg-user':'msg-ada'}`}>
+                <div key={i} ref={i === messages.length - 1 ? lastMsgRef : undefined} className={`msg-row ${msg.role==='user'?'msg-user':'msg-ada'}`}>
                   {msg.role==='assistant' && <AdaAvatar/>}
                   {msg.role==='assistant'
                     ? <AdaMessage content={msg.content} hasArtifact={artifactMsgIdxSet.has(i)}
