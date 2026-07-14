@@ -282,13 +282,13 @@ function SelectionCard({ label, description, selected, onClick }: { label: strin
   )
 }
 
-function AdaMessage({ content, isLast, isLoading, hasArtifact, onOption }: { content: string; isLast: boolean; isLoading: boolean; hasArtifact: boolean; onOption: (o: string) => void }) {
+function AdaMessage({ content, isLast, isLoading, hasArtifact, onOption, onOpenArtifact }: { content: string; isLast: boolean; isLoading: boolean; hasArtifact: boolean; onOption: (o: string) => void; onOpenArtifact: () => void }) {
   const { prose, options } = parseMessage(content)
   return (
     <div className="msg-bubble msg-bubble-ada">
       <div className="prose-ada" dangerouslySetInnerHTML={{ __html: renderMarkdown(prose) }}/>
       {hasArtifact && (
-        <div className="artifact-notice">
+        <div className="artifact-notice" onClick={onOpenArtifact} style={{ cursor: 'pointer' }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
           Script ready — view in panel →
         </div>
@@ -434,6 +434,9 @@ function DocumentViewer({ code, label }: { code: string; label: string }) {
 function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { artifacts: Artifact[]; currentIdx: number; onNavigate: (idx: number) => void; onClose: () => void; width: number }) {
   const [copied, setCopied] = useState(false)
   const [showExport, setShowExport] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [overrides, setOverrides] = useState<Record<string, string>>({})
   const exportRef = useRef<HTMLDivElement>(null)
   const artifact  = artifacts[currentIdx] ?? null
 
@@ -443,13 +446,28 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
   }, [showExport])
 
+  useEffect(() => { setEditing(false) }, [currentIdx])
+
+  const content = artifact ? (overrides[artifact.id] ?? artifact.code) : ''
+
+  function startEdit() {
+    if (!artifact) return
+    setDraft(content); setEditing(true)
+  }
+  function saveEdit() {
+    if (!artifact) return
+    setOverrides(prev => ({ ...prev, [artifact.id]: draft })); setEditing(false)
+  }
+  function cancelEdit() {
+    setEditing(false)
+  }
   function copy() {
     if (!artifact) return
-    navigator.clipboard.writeText(artifact.code); setCopied(true); setTimeout(() => setCopied(false), 2000)
+    navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 2000)
   }
   function download(ext: string) {
     if (!artifact) return
-    const blob = new Blob([artifact.code], { type: 'text/plain' })
+    const blob = new Blob([content], { type: 'text/plain' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href     = url
@@ -483,13 +501,23 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
           <button className={`artifact-action-btn ${copied?'artifact-action-btn-success':''}`} onClick={copy}>
             {copied ? <><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><polyline points="20 6 9 17 4 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>Copied!</> : <><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2"/></svg>Copy</>}
           </button>
+          {docType && (
+            editing ? (
+              <>
+                <button className="artifact-action-btn" onClick={saveEdit}>Save</button>
+                <button className="artifact-action-btn" onClick={cancelEdit}>Cancel</button>
+              </>
+            ) : (
+              <button className="artifact-action-btn" onClick={startEdit}>Edit</button>
+            )
+          )}
           <div className="export-wrapper" ref={exportRef}>
             <button className="artifact-action-btn" onClick={() => setShowExport(v=>!v)}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><polyline points="7 10 12 15 17 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>Export
             </button>
             {showExport && (
               <div className="export-dropdown">
-                {docType && <button onClick={() => { printDocument(artifact.label, artifact.code); setShowExport(false) }}>Download as PDF</button>}
+                {docType && <button onClick={() => { printDocument(artifact.label, content); setShowExport(false) }}>Download as PDF</button>}
                 <button onClick={() => download('txt')}>Download as .txt</button>
                 {!docType && <button onClick={() => download(ext)}>Download as .{ext}</button>}
                 <button onClick={() => download('md')}>Download as .md</button>
@@ -501,10 +529,12 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
       </div>
       <div className="artifact-body">
         {docType
-          ? <DocumentViewer code={artifact.code} label={artifact.label}/>
+          ? (editing
+              ? <textarea className="doc-edit-textarea" value={draft} onChange={e => setDraft(e.target.value)}/>
+              : <DocumentViewer code={content} label={artifact.label}/>)
           : isCode(artifact.lang)
-            ? <CodeWithLineNumbers code={artifact.code}/>
-            : <div className="artifact-prose prose-ada" dangerouslySetInnerHTML={{ __html: renderMarkdown(artifact.code) }}/>
+            ? <CodeWithLineNumbers code={content}/>
+            : <div className="artifact-prose prose-ada" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}/>
         }
       </div>
     </div>
@@ -902,7 +932,11 @@ function ResultsScreen({ product, deployment, role, initialProblem, onReset, onC
                 <div key={i} className={`msg-row ${msg.role==='user'?'msg-user':'msg-ada'}`}>
                   {msg.role==='assistant' && <AdaAvatar/>}
                   {msg.role==='assistant'
-                    ? <AdaMessage content={msg.content} isLast={i===lastAssistantIdx} isLoading={loading} hasArtifact={artifactMsgIdxSet.has(i)} onOption={sendMessage}/>
+                    ? <AdaMessage content={msg.content} isLast={i===lastAssistantIdx} isLoading={loading} hasArtifact={artifactMsgIdxSet.has(i)} onOption={sendMessage}
+                        onOpenArtifact={() => {
+                          const idx = artifacts.findIndex(a => a.msgIndex === i)
+                          if (idx !== -1) { setCurrentIdx(idx); setPanelOpen(true) }
+                        }}/>
                     : <div className="msg-bubble msg-bubble-user"><p className="msg-user-text">{msg.content}</p></div>
                   }
                 </div>
