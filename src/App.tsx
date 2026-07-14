@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import logoUrl from './logo.jpg'
+import logoUrl from './logo.png'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
