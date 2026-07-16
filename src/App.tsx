@@ -84,13 +84,13 @@ function parseMessage(content: string): { prose: string; options: string[] } {
   const options: string[] = []
   const prose = content
     .replace(/\[\[(.+?)\]\]/g, (_, o) => { options.push(o.trim()); return '' })
-    .replace(/```[\s\S]*?```/g, '')
+    .replace(/```[\s\S]*?(?:```|$)/g, '')
     .replace(/\n{3,}/g, '\n\n').trim()
   return { prose, options }
 }
 
 function extractArtifacts(content: string, msgIndex: number): Artifact[] {
-  const results: Artifact[] = []; const re = /```(\w*)\n?([\s\S]*?)```/g; let match, bi = 0
+  const results: Artifact[] = []; const re = /```(\w*)\n?([\s\S]*?)(?:```|$)/g; let match, bi = 0
   while ((match = re.exec(content)) !== null) {
     const lang = match[1] || 'text'; const code = match[2].trim()
     if (code.split('\n').length < 5) continue
@@ -740,7 +740,24 @@ RESPONSE RULES:
 7. When asking a clarifying question with multiple possible interpretations, do not write them as a prose bullet list. Instead, present each interpretation as a [[...]] clickable option, and do not include any additional [[...]] follow-up suggestions in that same response. The options ARE the interpretations, nothing else.
 8. Always exhaust every possible Adaptavist Group product fit before considering anything external. Only mention a non-Adaptavist tool as an absolute last resort, when no product in the PRODUCTS list could plausibly address the need, even partially or as a starting point, and say so explicitly (e.g. "this falls outside what any Adaptavist product currently covers"). Never suggest an external tool alongside an Adaptavist one as if they were equally weighted options.
 
-SETUP GUIDES (only when explicitly asked): Numbered steps. For ScriptRunner include a Groovy code block — the UI shows it in a side panel. Script must open with:
+SETUP GUIDES (only when explicitly asked): Numbered steps. Whenever a script is included, follow this exact structure, in order:
+
+1. A short 1-2 sentence intro — no code, and do not repeat the product name.
+2. A "## How it works" section formatted ONLY as a markdown table with two columns, Step and Detail, one row per step of what the script does, e.g.:
+
+   | Step | Detail |
+   |---|---|
+   | 1. Fetch links | Uses ... to retrieve ... |
+   | 2. Filter by type | Keeps only ... |
+
+   This table replaces any numbered-list or bullet explanation of the script's logic — never include both.
+3. The entire script, including its header comment, inside a single unbroken \`\`\`groovy fenced code block. Open the fence before any comment content and close it only after the final line of code — never split the header comment and code body across separate fences or into prose.
+4. Inside the fence, the header comment must use plain Groovy block-comment syntax (" * " prefix lines) as literal code, never reformatted as a markdown bullet list. This applies regardless of the MANDATORY OUTPUT FORMAT bullet rule above, which governs prose outside code fences only, never content inside a fence.
+5. Do not include a separate "example output" table.
+
+This structure applies every time a script is given, regardless of the user's stated role.
+
+Script must open with:
 
 \`\`\`groovy
 /*
