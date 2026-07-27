@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback, createElement, lazy, Suspense } from 'react'
 import logoUrl from './logo.png'
 import bannerUrl from './Tag_Headline.jpeg'
 import hljs from 'highlight.js/lib/core'
@@ -430,6 +430,10 @@ function CodeWithLineNumbers({ code, lang }: { code: string; lang: string }) {
   )
 }
 
+// CodeMirror and its language packages are sizeable, so the editor only
+// loads when someone actually opens Edit on a code artifact.
+const CodeEditor = lazy(() => import('./CodeEditor'))
+
 // ── Document Viewer ────────────────────────────────────────────────────────
 
 const HIGHLIGHT_COLOUR = '#FFF3E0'
@@ -507,7 +511,265 @@ ${bodyHtml}
   setTimeout(() => { win.focus(); win.print() }, 600)
 }
 
-function DocumentViewer({ code, label }: { code: string; label: string }) {
+// ── Document block model (for line-level editing) ──────────────────────────
+//
+// A document is a list of sections (split on "## " headings, same as
+// renderDocument/printDocument above). Each section is further broken into
+// blocks — heading/paragraph/blockquote/list/table/hr — mirroring the
+// line-grouping rules in renderMarkdown, so parse → edit → serialize
+// round-trips back into the same markdown shape the rest of the app expects.
+
+interface DocBlock {
+  kind: 'h1' | 'h2' | 'h3' | 'p' | 'blockquote' | 'hr' | 'table' | 'ul' | 'ol'
+  text?: string
+  items?: string[]
+}
+interface DocSection {
+  heading?: string   // undefined = preamble (no "## " heading)
+  important: boolean
+  blocks: DocBlock[]
+}
+
+function parseDocBlocks(md: string): DocBlock[] {
+  const lines = md.split('\n')
+  const blocks: DocBlock[] = []
+  let i = 0
+
+  function blankFollowedBy(from: number, pattern: RegExp): boolean {
+    let j = from
+    while (j < lines.length && lines[j].trim() === '') j++
+    return j < lines.length && pattern.test(lines[j].trim())
+  }
+
+  while (i < lines.length) {
+    const t = lines[i].trim()
+    if (t === '') { i++; continue }
+
+    if (/^### /.test(t)) { blocks.push({ kind: 'h3', text: t.slice(4) }); i++; continue }
+    if (/^## /.test(t))  { blocks.push({ kind: 'h2', text: t.slice(3) }); i++; continue }
+    if (/^# /.test(t))   { blocks.push({ kind: 'h1', text: t.slice(2) }); i++; continue }
+    if (/^[-*]{3,}$/.test(t)) { blocks.push({ kind: 'hr' }); i++; continue }
+    if (/^> /.test(t)) { blocks.push({ kind: 'blockquote', text: t.slice(2) }); i++; continue }
+
+    if (/^[-*•] /.test(t)) {
+      const items: string[] = []
+      while (i < lines.length) {
+        const line = lines[i].trim()
+        if (line === '') { if (blankFollowedBy(i + 1, /^[-*•] /)) { i++; continue } break }
+        if (!/^[-*•] /.test(line)) break
+        items.push(line.replace(/^[-*•] /, '')); i++
+      }
+      blocks.push({ kind: 'ul', items }); continue
+    }
+
+    if (/^\d+[.)]\s/.test(t)) {
+      const items: string[] = []
+      while (i < lines.length) {
+        const line = lines[i].trim()
+        if (line === '') { if (blankFollowedBy(i + 1, /^\d+[.)]\s/)) { i++; continue } break }
+        if (!/^\d+[.)]\s/.test(line)) break
+        items.push(line.replace(/^\d+[.)]\s/, '')); i++
+      }
+      blocks.push({ kind: 'ol', items }); continue
+    }
+
+    if (/^\|/.test(t)) {
+      const tbl: string[] = []
+      while (i < lines.length && /^\|/.test(lines[i].trim())) { tbl.push(lines[i]); i++ }
+      blocks.push({ kind: 'table', text: tbl.join('\n') }); continue
+    }
+
+    const para: string[] = []
+    while (
+      i < lines.length && lines[i].trim() !== '' &&
+      !/^#{1,3} /.test(lines[i].trim()) &&
+      !/^[-*•] /.test(lines[i].trim()) &&
+      !/^\d+[.)]\s/.test(lines[i].trim()) &&
+      !/^[-*]{3,}$/.test(lines[i].trim()) &&
+      !/^\|/.test(lines[i].trim()) &&
+      !/^> /.test(lines[i].trim())
+    ) { para.push(lines[i]); i++ }
+    if (para.length) blocks.push({ kind: 'p', text: para.join('\n') })
+  }
+  return blocks
+}
+
+function serializeDocBlocks(blocks: DocBlock[]): string {
+  return blocks.map(b => {
+    switch (b.kind) {
+      case 'h1': return `# ${b.text}`
+      case 'h2': return `## ${b.text}`
+      case 'h3': return `### ${b.text}`
+      case 'blockquote': return `> ${b.text}`
+      case 'hr': return '---'
+      case 'table': return b.text ?? ''
+      case 'ul': return (b.items ?? []).map(t => `- ${t}`).join('\n')
+      case 'ol': return (b.items ?? []).map((t, idx) => `${idx + 1}. ${t}`).join('\n')
+      case 'p': return b.text ?? ''
+      default: return ''
+    }
+  }).join('\n\n')
+}
+
+function parseDocument(md: string): DocSection[] {
+  const rawSections = md.split(/^(?=## )/m)
+  let sectionCount = 0
+  const sections: DocSection[] = []
+  rawSections.forEach((section, idx) => {
+    const trimmed = section.trim()
+    if (!trimmed) return
+    if (trimmed.startsWith('## ')) {
+      sectionCount++
+      const headingEnd = trimmed.indexOf('\n')
+      const heading = headingEnd > -1 ? trimmed.slice(3, headingEnd).trim() : trimmed.slice(3).trim()
+      const body    = headingEnd > -1 ? trimmed.slice(headingEnd + 1).trim() : ''
+      sections.push({ heading, important: isImportantSection(heading, sectionCount, idx === 1), blocks: parseDocBlocks(body) })
+    } else {
+      sections.push({ important: false, blocks: parseDocBlocks(trimmed) })
+    }
+  })
+  return sections
+}
+
+function serializeDocument(sections: DocSection[]): string {
+  return sections.map(s => {
+    const body = serializeDocBlocks(s.blocks)
+    return s.heading !== undefined ? `## ${s.heading}\n\n${body}` : body
+  }).join('\n\n')
+}
+
+function formatBlockText(text: string): string {
+  return text.split('\n').map(l => inlineFmt(l)).join('<br/>')
+}
+
+// One clickable renderable unit (heading/paragraph/bullet/etc). Displays
+// formatted HTML normally; on click (edit mode only) swaps its text content
+// for an input/textarea nested inside the SAME tag, so it inherits that
+// tag's font size/weight/colour via CSS cascade and never jumps position.
+function EditableLine({ text, isEditing, tag, className, multiline, renderDisplay, onCommit }: {
+  text: string; isEditing: boolean; tag: 'h1' | 'h2' | 'h3' | 'p' | 'blockquote' | 'li' | 'div'
+  className?: string; multiline?: boolean
+  renderDisplay?: (text: string) => string
+  onCommit: (text: string) => void
+}) {
+  const [active, setActive] = useState(false)
+  const [val, setVal] = useState(text)
+
+  useEffect(() => { setVal(text) }, [text])
+  useEffect(() => { if (!isEditing) setActive(false) }, [isEditing])
+
+  function commit() {
+    setActive(false)
+    if (val !== text) onCommit(val)
+  }
+  function cancelField() { setVal(text); setActive(false) }
+
+  const baseClassName = [className, isEditing ? 'doc-editable-line' : ''].filter(Boolean).join(' ')
+
+  if (active) {
+    return createElement(tag, { className: baseClassName },
+      multiline ? (
+        <textarea
+          className="doc-edit-inline"
+          autoFocus
+          value={val}
+          rows={Math.max(1, val.split('\n').length)}
+          onChange={e => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Escape') cancelField() }}
+        />
+      ) : (
+        <input
+          className="doc-edit-inline"
+          autoFocus
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() }
+            if (e.key === 'Escape') cancelField()
+          }}
+        />
+      )
+    )
+  }
+
+  return createElement(tag, {
+    className: baseClassName,
+    onClick: isEditing ? () => setActive(true) : undefined,
+    dangerouslySetInnerHTML: { __html: (renderDisplay ?? formatBlockText)(text) },
+  })
+}
+
+function DocumentViewer({ code, label, isEditing = false, onChange }: {
+  code: string; label: string; isEditing?: boolean; onChange?: (md: string) => void
+}) {
+  const [sections, setSections] = useState<DocSection[]>(() => parseDocument(code))
+  const wasEditing = useRef(isEditing)
+
+  useEffect(() => {
+    if (isEditing && !wasEditing.current) setSections(parseDocument(code))
+    wasEditing.current = isEditing
+  }, [isEditing, code])
+
+  const displaySections = isEditing ? sections : parseDocument(code)
+
+  function commit(next: DocSection[]) {
+    setSections(next)
+    onChange?.(serializeDocument(next))
+  }
+  function updateHeading(si: number, text: string) {
+    commit(sections.map((s, i) => i === si ? { ...s, heading: text } : s))
+  }
+  function updateBlockText(si: number, bi: number, text: string) {
+    commit(sections.map((s, i) => i !== si ? s : { ...s, blocks: s.blocks.map((b, j) => j === bi ? { ...b, text } : b) }))
+  }
+  function updateListItem(si: number, bi: number, ii: number, text: string) {
+    commit(sections.map((s, i) => i !== si ? s : {
+      ...s,
+      blocks: s.blocks.map((b, j) => j !== bi ? b : { ...b, items: (b.items ?? []).map((it, k) => k === ii ? text : it) }),
+    }))
+  }
+
+  function renderBlock(block: DocBlock, si: number, bi: number) {
+    switch (block.kind) {
+      case 'h1': case 'h2': case 'h3':
+        return <EditableLine key={bi} tag={block.kind} text={block.text ?? ''} isEditing={isEditing}
+          onCommit={t => updateBlockText(si, bi, t)}/>
+      case 'p':
+        return <EditableLine key={bi} tag="p" text={block.text ?? ''} isEditing={isEditing} multiline
+          onCommit={t => updateBlockText(si, bi, t)}/>
+      case 'blockquote':
+        return <EditableLine key={bi} tag="blockquote" text={block.text ?? ''} isEditing={isEditing}
+          onCommit={t => updateBlockText(si, bi, t)}/>
+      case 'hr':
+        return <hr key={bi}/>
+      case 'table':
+        // Fallback: tables edit as a single raw-markdown block rather than per-cell.
+        return <EditableLine key={bi} tag="div" className="doc-table-block" text={block.text ?? ''} isEditing={isEditing} multiline
+          renderDisplay={renderMarkdown} onCommit={t => updateBlockText(si, bi, t)}/>
+      case 'ul':
+        return (
+          <ul key={bi}>
+            {(block.items ?? []).map((item, ii) => (
+              <EditableLine key={ii} tag="li" text={item} isEditing={isEditing}
+                onCommit={t => updateListItem(si, bi, ii, t)}/>
+            ))}
+          </ul>
+        )
+      case 'ol':
+        return (
+          <ol key={bi}>
+            {(block.items ?? []).map((item, ii) => (
+              <EditableLine key={ii} tag="li" text={item} isEditing={isEditing}
+                onCommit={t => updateListItem(si, bi, ii, t)}/>
+            ))}
+          </ol>
+        )
+      default: return null
+    }
+  }
+
   return (
     <div className="doc-viewer">
       <div className="doc-header-bar">
@@ -518,31 +780,19 @@ function DocumentViewer({ code, label }: { code: string; label: string }) {
       </div>
 
       <div className="doc-body">
-        {(() => {
-          let sectionCount = 0
-          return code.split(/^(?=## )/m).map((section, idx) => {
-            const trimmed = section.trim()
-            if (!trimmed) return null
-            if (trimmed.startsWith('## ')) {
-              sectionCount++
-              const headingEnd = trimmed.indexOf('\n')
-              const heading    = headingEnd > -1 ? trimmed.slice(3, headingEnd).trim() : trimmed.slice(3).trim()
-              const body       = headingEnd > -1 ? trimmed.slice(headingEnd + 1).trim() : ''
-              const important  = isImportantSection(heading, sectionCount, idx === 1)
-              return (
-                <div key={idx} className="doc-section" style={important ? { background: HIGHLIGHT_COLOUR } : undefined}>
-                  <div className="doc-section-heading">{heading}</div>
-                  <div className="doc-section-body prose-ada"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}/>
-                </div>
-              )
-            }
-            return (
-              <div key={idx} className="doc-preamble prose-ada"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(trimmed) }}/>
-            )
-          })
-        })()}
+        {displaySections.map((section, si) => section.heading !== undefined ? (
+          <div key={si} className="doc-section" style={section.important ? { background: HIGHLIGHT_COLOUR } : undefined}>
+            <EditableLine tag="div" className="doc-section-heading" text={section.heading} isEditing={isEditing}
+              onCommit={t => updateHeading(si, t)}/>
+            <div className="doc-section-body prose-ada">
+              {section.blocks.map((b, bi) => renderBlock(b, si, bi))}
+            </div>
+          </div>
+        ) : (
+          <div key={si} className="doc-preamble prose-ada">
+            {section.blocks.map((b, bi) => renderBlock(b, si, bi))}
+          </div>
+        ))}
       </div>
 
       <div className="doc-footer-bar">
@@ -604,8 +854,10 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
   }
 
   if (!artifact) return null
-  const ext     = langExt(artifact.lang)
-  const docType = isDoc(artifact.lang)
+  const ext      = langExt(artifact.lang)
+  const docType  = isDoc(artifact.lang)
+  const codeType = isCode(artifact.lang)
+  const editable = docType || codeType
 
   return (
     <div className="artifact-panel" style={{ width }}>
@@ -625,7 +877,7 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
           <button className={`artifact-action-btn ${copied?'artifact-action-btn-success':''}`} onClick={copy}>
             {copied ? <><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><polyline points="20 6 9 17 4 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>Copied!</> : <><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2"/></svg>Copy</>}
           </button>
-          {docType && (
+          {editable && (
             editing ? (
               <>
                 <button className="artifact-action-btn" onClick={saveEdit}>Save</button>
@@ -653,14 +905,21 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
       </div>
       <div className="artifact-body">
         {docType
-          ? (editing
-              ? <textarea className="doc-edit-textarea" value={draft} onChange={e => setDraft(e.target.value)}/>
-              : <DocumentViewer code={content} label={artifact.label}/>)
-          : isCode(artifact.lang)
-            ? <>
-                <div className="code-disclaimer">⚠️ AI-generated — please review and test before using in production.</div>
-                <CodeWithLineNumbers code={content} lang={artifact.lang}/>
-              </>
+          ? <DocumentViewer code={content} label={artifact.label} isEditing={editing} onChange={setDraft}/>
+          : codeType
+            ? (editing ? (
+                <div className="code-editor-wrap">
+                  <div className="code-disclaimer">⚠️ AI-generated — please review and test before using in production.</div>
+                  <Suspense fallback={<div className="code-editor-loading">Loading editor…</div>}>
+                    <CodeEditor code={draft} lang={artifact.lang} onChange={setDraft}/>
+                  </Suspense>
+                </div>
+              ) : (
+                <>
+                  <div className="code-disclaimer">⚠️ AI-generated — please review and test before using in production.</div>
+                  <CodeWithLineNumbers code={content} lang={artifact.lang}/>
+                </>
+              ))
             : <div className="artifact-prose prose-ada" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}/>
         }
       </div>
