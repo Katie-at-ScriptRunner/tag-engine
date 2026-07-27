@@ -394,8 +394,8 @@ function SelectionCard({ label, description, selected, onClick }: { label: strin
   )
 }
 
-function AdaMessage({ content, hasArtifact, isCodeArtifact, onOpenArtifact }: {
-  content: string; hasArtifact: boolean; isCodeArtifact: boolean; onOpenArtifact: () => void
+function AdaMessage({ content, hasArtifact, isCodeArtifact, onOpenArtifact, onFeedback }: {
+  content: string; hasArtifact: boolean; isCodeArtifact: boolean; onOpenArtifact: () => void; onFeedback: () => void
 }) {
   const { prose } = parseMessage(content)
   return (
@@ -410,6 +410,10 @@ function AdaMessage({ content, hasArtifact, isCodeArtifact, onOpenArtifact }: {
       {hasArtifact && isCodeArtifact && (
         <div className="artifact-ai-disclaimer">⚠️ AI-generated — please review and test before using.</div>
       )}
+      <button type="button" className="feedback-btn-inline" onClick={onFeedback}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        Feedback
+      </button>
     </div>
   )
 }
@@ -1177,6 +1181,11 @@ Only use [[...]] for selectable choices.`
 
 const ADA_ENDPOINT = 'https://event.scriptrunnerconnect.com/ioyk7g6ee2nyqav5xyn7pm'
 
+// Feedback goes to a separate ScriptRunner Connect event listener that
+// creates a Jira ticket. Same direct-fetch pattern as callAda below, no
+// backend or Netlify function involved.
+const FEEDBACK_ENDPOINT = 'https://event.scriptrunnerconnect.com/dggyyr1zpmzdp7ko2kgpjw'
+
 function getOrCreateUserId(): string {
   const existing = localStorage.getItem('tagEngineUserId')
   if (existing) return existing
@@ -1199,6 +1208,166 @@ async function callAda(messages: { role: 'user' | 'assistant' | 'system'; conten
   return data.content[0].text as string
 }
 
+// ── Feedback ───────────────────────────────────────────────────────────────
+
+type FeedbackRating   = 'up' | 'down'
+type FeedbackCategory = 'something-broken' | 'general-feedback' | 'question' | 'feature-request'
+
+const FEEDBACK_CATEGORIES: { value: FeedbackCategory; label: string }[] = [
+  { value: 'something-broken', label: "Something's broken" },
+  { value: 'general-feedback', label: 'General feedback' },
+  { value: 'question',         label: 'Question' },
+  { value: 'feature-request',  label: 'Feature request' },
+]
+
+interface FeedbackPayload {
+  rating: FeedbackRating
+  category: FeedbackCategory
+  message: string
+  context: {
+    role: Role
+    product: string
+    adaMessage?: string
+  }
+}
+
+// The ScriptRunner Connect script's exact response shape hasn't been
+// confirmed yet, so this handles a few reasonable shapes defensively:
+// a flat { ticketKey }, a nested { body: { ticketKey } }, or a stringified
+// { body: "..." } that itself needs parsing.
+function extractTicketKey(data: any): string | null {
+  if (!data) return null
+  if (typeof data.ticketKey === 'string') return data.ticketKey
+  if (data.body && typeof data.body === 'object' && typeof data.body.ticketKey === 'string') return data.body.ticketKey
+  if (typeof data.body === 'string') {
+    try {
+      const parsed = JSON.parse(data.body)
+      if (typeof parsed.ticketKey === 'string') return parsed.ticketKey
+    } catch { /* not JSON, ignore */ }
+  }
+  return null
+}
+
+async function submitFeedback(payload: FeedbackPayload): Promise<string> {
+  const res = await fetch(FEEDBACK_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    throw new Error(`Feedback request failed (${res.status})`)
+  }
+  const data = await res.json()
+  const ticketKey = extractTicketKey(data)
+  if (!ticketKey) {
+    throw new Error('Unexpected response from feedback service')
+  }
+  return ticketKey
+}
+
+function FeedbackPanel({ role, currentProducts, adaMessage, onClose }: {
+  role: Role; currentProducts: AdaptavistProduct[]; adaMessage?: string; onClose: () => void
+}) {
+  const [rating,     setRating]     = useState<FeedbackRating | null>(null)
+  const [category,   setCategory]   = useState<FeedbackCategory | ''>('')
+  const [message,    setMessage]    = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error,      setError]      = useState<string | null>(null)
+  const [ticketKey,  setTicketKey]  = useState<string | null>(null)
+
+  const ready = rating !== null && category !== '' && message.trim().length > 10
+
+  async function submit() {
+    if (!ready || submitting || !rating || !category) return
+    setSubmitting(true); setError(null)
+    try {
+      const key = await submitFeedback({
+        rating,
+        category,
+        message: message.trim(),
+        context: {
+          role,
+          product: currentProducts.length ? currentProducts.join(', ') : 'Not specified',
+          ...(adaMessage ? { adaMessage } : {}),
+        },
+      })
+      setTicketKey(key)
+    } catch {
+      setError('Could not submit feedback — please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="feedback-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="feedback-modal">
+        {ticketKey ? (
+          <div className="feedback-success">
+            <div className="feedback-modal-header">
+              <span className="feedback-modal-title">Send feedback</span>
+              <button className="feedback-close-btn" onClick={onClose}>✕</button>
+            </div>
+            <p className="feedback-success-text">Thanks — logged as <strong>{ticketKey}</strong>.</p>
+            <div className="feedback-actions">
+              <button type="button" className="btn-primary" onClick={onClose}>Close</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="feedback-modal-header">
+              <span className="feedback-modal-title">Send feedback</span>
+              <button className="feedback-close-btn" onClick={onClose}>✕</button>
+            </div>
+
+            <div className="feedback-field">
+              <label className="selector-label">How's it going?</label>
+              <div className="feedback-rating-row">
+                <button type="button" className={`feedback-rating-btn ${rating==='up'?'feedback-rating-btn-selected':''}`}
+                  disabled={submitting} onClick={() => setRating('up')} aria-label="Thumbs up">👍</button>
+                <button type="button" className={`feedback-rating-btn ${rating==='down'?'feedback-rating-btn-selected':''}`}
+                  disabled={submitting} onClick={() => setRating('down')} aria-label="Thumbs down">👎</button>
+              </div>
+            </div>
+
+            <div className="feedback-field">
+              <label className="selector-label" htmlFor="feedback-category">Category</label>
+              <select id="feedback-category" className={`role-select ${category?'role-select-filled':''}`}
+                value={category} disabled={submitting}
+                onChange={e => setCategory(e.target.value as FeedbackCategory)}>
+                <option value="">Select a category…</option>
+                {FEEDBACK_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+
+            <div className="feedback-field">
+              <label className="selector-label" htmlFor="feedback-message">Message</label>
+              <div className="card card-tight">
+                <textarea id="feedback-message" className="problem-textarea" rows={4} disabled={submitting}
+                  placeholder="What's on your mind?" value={message} onChange={e => setMessage(e.target.value)}/>
+              </div>
+            </div>
+
+            {error && (
+              <div className="error-banner">
+                <span>{error}</span>
+                <button className="retry-btn" onClick={submit}>Retry</button>
+              </div>
+            )}
+
+            <div className="feedback-actions">
+              <button type="button" className="feedback-cancel-btn" onClick={onClose} disabled={submitting}>Cancel</button>
+              <button type="button" className={`btn-primary ${!ready||submitting?'btn-disabled':''}`} disabled={!ready||submitting} onClick={submit}>
+                {submitting ? 'Sending…' : 'Submit'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Screen 3 ───────────────────────────────────────────────────────────────
 
 const DEFAULT_PANEL_WIDTH = 480
@@ -1217,6 +1386,13 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH)
   const [currentIdx, setCurrentIdx] = useState(0)
   const [isMobile,   setIsMobile]   = useState(() => window.innerWidth < 768)
+  const [feedbackOpen,    setFeedbackOpen]    = useState(false)
+  const [feedbackMsgText, setFeedbackMsgText] = useState<string | undefined>(undefined)
+
+  function openFeedback(msgContent?: string) {
+    setFeedbackMsgText(msgContent)
+    setFeedbackOpen(true)
+  }
 
   const bottomRef     = useRef<HTMLDivElement>(null)
   const lastMsgRef    = useRef<HTMLDivElement>(null)
@@ -1332,7 +1508,13 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
           <PlatformBadge role={role} currentProducts={currentProducts}
             onChangeRole={handleChangeRole}/>
         </div>
-        <button onClick={onReset} className="reset-btn">↺ Start over</button>
+        <div className="flex items-center gap-2">
+          <button type="button" className="feedback-btn-topbar" onClick={() => openFeedback()}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Feedback
+          </button>
+          <button onClick={onReset} className="reset-btn">↺ Start over</button>
+        </div>
       </div>
 
       <div className="results-body">
@@ -1348,7 +1530,8 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
                         onOpenArtifact={() => {
                           const idx = artifacts.findIndex(a => a.msgIndex === i)
                           if (idx !== -1) { setCurrentIdx(idx); setPanelOpen(true) }
-                        }}/>
+                        }}
+                        onFeedback={() => openFeedback(msg.content)}/>
                     : <div className="msg-bubble msg-bubble-user"><p className="msg-user-text">{msg.content}</p></div>
                   }
                 </div>
@@ -1388,6 +1571,11 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
           </div>
         )}
       </div>
+
+      {feedbackOpen && (
+        <FeedbackPanel role={role} currentProducts={currentProducts} adaMessage={feedbackMsgText}
+          onClose={() => setFeedbackOpen(false)}/>
+      )}
     </div>
   )
 }
