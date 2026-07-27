@@ -1,6 +1,52 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import logoUrl from './logo.png'
 import bannerUrl from './Tag_Headline.jpeg'
+import hljs from 'highlight.js/lib/core'
+import hljsGroovy from 'highlight.js/lib/languages/groovy'
+import hljsJavascript from 'highlight.js/lib/languages/javascript'
+import hljsTypescript from 'highlight.js/lib/languages/typescript'
+import hljsPython from 'highlight.js/lib/languages/python'
+import hljsJava from 'highlight.js/lib/languages/java'
+import hljsKotlin from 'highlight.js/lib/languages/kotlin'
+import hljsSql from 'highlight.js/lib/languages/sql'
+import hljsBash from 'highlight.js/lib/languages/bash'
+import hljsXml from 'highlight.js/lib/languages/xml'
+import hljsJson from 'highlight.js/lib/languages/json'
+import hljsYaml from 'highlight.js/lib/languages/yaml'
+import hljsCss from 'highlight.js/lib/languages/css'
+import hljsRuby from 'highlight.js/lib/languages/ruby'
+import hljsGo from 'highlight.js/lib/languages/go'
+import hljsRust from 'highlight.js/lib/languages/rust'
+import hljsC from 'highlight.js/lib/languages/c'
+import hljsCpp from 'highlight.js/lib/languages/cpp'
+import hljsCsharp from 'highlight.js/lib/languages/csharp'
+import hljsScala from 'highlight.js/lib/languages/scala'
+import hljsPhp from 'highlight.js/lib/languages/php'
+import hljsSwift from 'highlight.js/lib/languages/swift'
+import hljsR from 'highlight.js/lib/languages/r'
+
+hljs.registerLanguage('groovy', hljsGroovy)
+hljs.registerLanguage('javascript', hljsJavascript)
+hljs.registerLanguage('typescript', hljsTypescript)
+hljs.registerLanguage('python', hljsPython)
+hljs.registerLanguage('java', hljsJava)
+hljs.registerLanguage('kotlin', hljsKotlin)
+hljs.registerLanguage('sql', hljsSql)
+hljs.registerLanguage('bash', hljsBash)
+hljs.registerLanguage('xml', hljsXml)
+hljs.registerLanguage('json', hljsJson)
+hljs.registerLanguage('yaml', hljsYaml)
+hljs.registerLanguage('css', hljsCss)
+hljs.registerLanguage('ruby', hljsRuby)
+hljs.registerLanguage('go', hljsGo)
+hljs.registerLanguage('rust', hljsRust)
+hljs.registerLanguage('c', hljsC)
+hljs.registerLanguage('cpp', hljsCpp)
+hljs.registerLanguage('csharp', hljsCsharp)
+hljs.registerLanguage('scala', hljsScala)
+hljs.registerLanguage('php', hljsPhp)
+hljs.registerLanguage('swift', hljsSwift)
+hljs.registerLanguage('r', hljsR)
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -363,31 +409,50 @@ function AdaMessage({ content, hasArtifact, onOpenArtifact }: { content: string;
   )
 }
 
-function CodeWithLineNumbers({ code }: { code: string }) {
+function CodeWithLineNumbers({ code, lang }: { code: string; lang: string }) {
   const lines = code.split('\n')
+  const highlighted = useMemo(() => {
+    const language = lang.toLowerCase()
+    if (hljs.getLanguage(language)) {
+      try { return hljs.highlight(code, { language }).value } catch { /* fall through */ }
+    }
+    try { return hljs.highlightAuto(code).value } catch { return null }
+  }, [code, lang])
+
   return (
     <div className="code-with-lines">
       <div className="line-numbers" aria-hidden="true">{lines.map((_, i) => <span key={i}>{i+1}</span>)}</div>
-      <pre className="code-content"><code>{code}</code></pre>
+      {highlighted != null
+        ? <pre className="code-content"><code className="hljs" dangerouslySetInnerHTML={{ __html: highlighted }}/></pre>
+        : <pre className="code-content"><code>{code}</code></pre>
+      }
     </div>
   )
 }
 
 // ── Document Viewer ────────────────────────────────────────────────────────
 
-const SECTION_COLOURS = ['#DAEAE9','#FFFFF0','#F9F0F9','#E8F0FF','#FFF3E0','#F0F9EE']
+const HIGHLIGHT_COLOUR = '#FFF3E0'
+const IMPORTANT_HEADING_RE = /recommended|key benefit|solution/i
+
+function isImportantSection(heading: string, sectionIdx: number, isFirstSection: boolean): boolean {
+  if (IMPORTANT_HEADING_RE.test(heading)) return true
+  return isFirstSection && sectionIdx === 1
+}
 
 function renderDocument(md: string): string {
   const sections = md.split(/^(?=## )/m)
+  let sectionCount = 0
   return sections.map((section, idx) => {
     const trimmed = section.trim()
     if (!trimmed) return ''
     if (trimmed.startsWith('## ')) {
+      sectionCount++
       const headingEnd = trimmed.indexOf('\n')
       const heading    = headingEnd > -1 ? trimmed.slice(3, headingEnd).trim() : trimmed.slice(3).trim()
       const body       = headingEnd > -1 ? trimmed.slice(headingEnd + 1).trim() : ''
-      const colour     = SECTION_COLOURS[(idx - 1) % SECTION_COLOURS.length]
-      return `<div class="doc-section" style="background:${colour}">
+      const important  = isImportantSection(heading, sectionCount, idx === 1)
+      return `<div class="doc-section"${important ? ` style="background:${HIGHLIGHT_COLOUR}"` : ''}>
         <h2 class="doc-section-heading">${inlineFmt(heading)}</h2>
         <div class="doc-section-body">${renderMarkdown(body)}</div>
       </div>`
@@ -430,7 +495,6 @@ function printDocument(label: string, content: string) {
   <img src="${logoUrl}" alt="Adaptavist" style="height:36px;width:auto;object-fit:contain;" onerror="this.style.display='none'"/>
   <div class="doc-header-text">
     <div class="doc-header-title">${label}</div>
-    <div class="doc-header-sub">Generated by TAG Engine &middot; adaptavist.com</div>
   </div>
 </div>
 ${bodyHtml}
@@ -450,32 +514,35 @@ function DocumentViewer({ code, label }: { code: string; label: string }) {
         <TagLogo size={32}/>
         <div>
           <div className="doc-viewer-title">{label}</div>
-          <div className="doc-viewer-sub">Generated by TAG Engine</div>
         </div>
       </div>
 
       <div className="doc-body">
-        {code.split(/^(?=## )/m).map((section, idx) => {
-          const trimmed = section.trim()
-          if (!trimmed) return null
-          if (trimmed.startsWith('## ')) {
-            const headingEnd = trimmed.indexOf('\n')
-            const heading    = headingEnd > -1 ? trimmed.slice(3, headingEnd).trim() : trimmed.slice(3).trim()
-            const body       = headingEnd > -1 ? trimmed.slice(headingEnd + 1).trim() : ''
-            const colour     = SECTION_COLOURS[(idx - 1) % SECTION_COLOURS.length]
+        {(() => {
+          let sectionCount = 0
+          return code.split(/^(?=## )/m).map((section, idx) => {
+            const trimmed = section.trim()
+            if (!trimmed) return null
+            if (trimmed.startsWith('## ')) {
+              sectionCount++
+              const headingEnd = trimmed.indexOf('\n')
+              const heading    = headingEnd > -1 ? trimmed.slice(3, headingEnd).trim() : trimmed.slice(3).trim()
+              const body       = headingEnd > -1 ? trimmed.slice(headingEnd + 1).trim() : ''
+              const important  = isImportantSection(heading, sectionCount, idx === 1)
+              return (
+                <div key={idx} className="doc-section" style={important ? { background: HIGHLIGHT_COLOUR } : undefined}>
+                  <div className="doc-section-heading">{heading}</div>
+                  <div className="doc-section-body prose-ada"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}/>
+                </div>
+              )
+            }
             return (
-              <div key={idx} className="doc-section" style={{ background: colour }}>
-                <div className="doc-section-heading">{heading}</div>
-                <div className="doc-section-body prose-ada"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}/>
-              </div>
+              <div key={idx} className="doc-preamble prose-ada"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(trimmed) }}/>
             )
-          }
-          return (
-            <div key={idx} className="doc-preamble prose-ada"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(trimmed) }}/>
-          )
-        })}
+          })
+        })()}
       </div>
 
       <div className="doc-footer-bar">
@@ -544,7 +611,7 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
     <div className="artifact-panel" style={{ width }}>
       <div className="artifact-header">
         <div className="artifact-header-left">
-          <span className="artifact-title" title={artifact.label}>{artifact.label.length > 28 ? artifact.label.slice(0,27)+'…' : artifact.label}</span>
+          <span className="artifact-title" title={artifact.label}>{artifact.label}</span>
           {artifact.lang && artifact.lang !== 'text' && <span className="artifact-lang-badge">{docType ? 'DOCUMENT' : artifact.lang.toUpperCase()}</span>}
           {artifacts.length > 1 && (
             <div className="artifact-nav">
@@ -590,7 +657,10 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
               ? <textarea className="doc-edit-textarea" value={draft} onChange={e => setDraft(e.target.value)}/>
               : <DocumentViewer code={content} label={artifact.label}/>)
           : isCode(artifact.lang)
-            ? <CodeWithLineNumbers code={content}/>
+            ? <>
+                <div className="code-disclaimer">⚠️ AI-generated — please review and test before using in production.</div>
+                <CodeWithLineNumbers code={content} lang={artifact.lang}/>
+              </>
             : <div className="artifact-prose prose-ada" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}/>
         }
       </div>
@@ -804,10 +874,12 @@ To discuss further or request a demonstration, contact the Adaptavist team at [a
 
 Rules for documents:
 - Keep language appropriate to the intended reader (exec = strategic, CSM = outcomes, SE = technical)
-- Each ## section becomes a distinct coloured card in the rendered document
+- Each ## section becomes a distinct card in the rendered document
 - Limit to 6–8 sections maximum — this is a one-pager, not a report
 - Use the role context to determine tone and content emphasis
 - Always include a "Get in Touch" section with the contact URL
+- The # Title must be short and punchy, aim for under 8 words. Do not use a colon-plus-long-subtitle format (e.g. not "Taming Confluence: How to Build a Knowledge Base Your Team Actually Uses"). Prefer something like "Taming Confluence" on its own.
+- Never simply restate or transcribe the user's prompt back to them as the document's framing. Instead, think about what the reader of this document most needs to know to make a decision, and lead the introduction and "The Challenge" section with that synthesis, not a rephrasing of what was asked.
 
 TITLING: Every script or document must open with a specific, descriptive title reflecting exactly what it does, not a generic label. For scripts, the Purpose: line in the header comment must name the actual function (e.g. "Auto-transition issues on sprint close for ScriptRunner Cloud", not "Automation Script"). For documents, the # Title must reflect the specific recommendation or challenge discussed (e.g. "Mosaic Rollout Plan for Messy Confluence Pages", not "One-Pager").
 
