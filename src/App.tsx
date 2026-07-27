@@ -394,7 +394,9 @@ function SelectionCard({ label, description, selected, onClick }: { label: strin
   )
 }
 
-function AdaMessage({ content, hasArtifact, onOpenArtifact }: { content: string; hasArtifact: boolean; onOpenArtifact: () => void }) {
+function AdaMessage({ content, hasArtifact, isCodeArtifact, onOpenArtifact }: {
+  content: string; hasArtifact: boolean; isCodeArtifact: boolean; onOpenArtifact: () => void
+}) {
   const { prose } = parseMessage(content)
   return (
     <div className="msg-bubble msg-bubble-ada">
@@ -404,6 +406,9 @@ function AdaMessage({ content, hasArtifact, onOpenArtifact }: { content: string;
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
           Script ready — view in panel →
         </div>
+      )}
+      {hasArtifact && isCodeArtifact && (
+        <div className="artifact-ai-disclaimer">⚠️ AI-generated — please review and test before using.</div>
       )}
     </div>
   )
@@ -436,27 +441,29 @@ const CodeEditor = lazy(() => import('./CodeEditor'))
 
 // ── Document Viewer ────────────────────────────────────────────────────────
 
-const HIGHLIGHT_COLOUR = '#FFF3E0'
-const IMPORTANT_HEADING_RE = /recommended|key benefit|solution/i
+const IMPORTANT_HEADINGS = ['recommended solution', 'recommendation', 'the solution']
 
-function isImportantSection(heading: string, sectionIdx: number, isFirstSection: boolean): boolean {
-  if (IMPORTANT_HEADING_RE.test(heading)) return true
-  return isFirstSection && sectionIdx === 1
+function isImportantSection(heading: string): boolean {
+  return IMPORTANT_HEADINGS.includes(heading.trim().toLowerCase())
+}
+
+// The title is already shown in the header bar (doc-viewer-title / doc-header-title),
+// so a leading "# Title" line in the markdown body would otherwise duplicate it.
+function stripLeadingTitle(md: string): string {
+  return md.replace(/^\s*#\s[^\n]*\n?/, '')
 }
 
 function renderDocument(md: string): string {
-  const sections = md.split(/^(?=## )/m)
-  let sectionCount = 0
-  return sections.map((section, idx) => {
+  const sections = stripLeadingTitle(md).split(/^(?=## )/m)
+  return sections.map(section => {
     const trimmed = section.trim()
     if (!trimmed) return ''
     if (trimmed.startsWith('## ')) {
-      sectionCount++
       const headingEnd = trimmed.indexOf('\n')
       const heading    = headingEnd > -1 ? trimmed.slice(3, headingEnd).trim() : trimmed.slice(3).trim()
       const body       = headingEnd > -1 ? trimmed.slice(headingEnd + 1).trim() : ''
-      const important  = isImportantSection(heading, sectionCount, idx === 1)
-      return `<div class="doc-section"${important ? ` style="background:${HIGHLIGHT_COLOUR}"` : ''}>
+      const important  = isImportantSection(heading)
+      return `<div class="doc-section${important ? ' doc-section-important' : ''}">
         <h2 class="doc-section-heading">${inlineFmt(heading)}</h2>
         <div class="doc-section-body">${renderMarkdown(body)}</div>
       </div>`
@@ -481,7 +488,8 @@ function printDocument(label: string, content: string) {
   .doc-header-sub { font-size:11px; color:#5C6878; margin:2px 0 0; }
   .doc-logo { width:36px; height:36px; }
   .doc-preamble { margin-bottom:16px; font-size:13px; color:#5C6878; }
-  .doc-section { border-radius:8px; padding:16px 20px; margin-bottom:14px; break-inside:avoid; }
+  .doc-section { padding:0 0 16px; margin-bottom:14px; border-bottom:1px solid #E5E7EB; break-inside:avoid; }
+  .doc-section-important { background:#FFF0E8; border:none; border-left:3px solid #FC6C34; border-radius:0 6px 6px 0; padding:16px 20px; }
   .doc-section-heading { font-size:14px; font-weight:700; color:#08142C; margin:0 0 8px; text-transform:uppercase; letter-spacing:.04em; }
   .doc-section-body { font-size:13px; line-height:1.65; }
   .doc-section-body p { margin:0 0 8px; }
@@ -613,17 +621,15 @@ function serializeDocBlocks(blocks: DocBlock[]): string {
 
 function parseDocument(md: string): DocSection[] {
   const rawSections = md.split(/^(?=## )/m)
-  let sectionCount = 0
   const sections: DocSection[] = []
-  rawSections.forEach((section, idx) => {
+  rawSections.forEach(section => {
     const trimmed = section.trim()
     if (!trimmed) return
     if (trimmed.startsWith('## ')) {
-      sectionCount++
       const headingEnd = trimmed.indexOf('\n')
       const heading = headingEnd > -1 ? trimmed.slice(3, headingEnd).trim() : trimmed.slice(3).trim()
       const body    = headingEnd > -1 ? trimmed.slice(headingEnd + 1).trim() : ''
-      sections.push({ heading, important: isImportantSection(heading, sectionCount, idx === 1), blocks: parseDocBlocks(body) })
+      sections.push({ heading, important: isImportantSection(heading), blocks: parseDocBlocks(body) })
     } else {
       sections.push({ important: false, blocks: parseDocBlocks(trimmed) })
     }
@@ -781,7 +787,7 @@ function DocumentViewer({ code, label, isEditing = false, onChange }: {
 
       <div className="doc-body">
         {displaySections.map((section, si) => section.heading !== undefined ? (
-          <div key={si} className="doc-section" style={section.important ? { background: HIGHLIGHT_COLOUR } : undefined}>
+          <div key={si} className={`doc-section ${section.important ? 'doc-section-important' : ''}`}>
             <EditableLine tag="div" className="doc-section-heading" text={section.heading} isEditing={isEditing}
               onCommit={t => updateHeading(si, t)}/>
             <div className="doc-section-body prose-ada">
@@ -790,7 +796,12 @@ function DocumentViewer({ code, label, isEditing = false, onChange }: {
           </div>
         ) : (
           <div key={si} className="doc-preamble prose-ada">
-            {section.blocks.map((b, bi) => renderBlock(b, si, bi))}
+            {section.blocks.map((b, bi) => {
+              // The title is already shown in the header bar; don't duplicate the leading "# Title" line here.
+              // Still present in the underlying data model, so Save/Export/Copy keep the title intact.
+              if (bi === 0 && b.kind === 'h1') return null
+              return renderBlock(b, si, bi)
+            })}
           </div>
         ))}
       </div>
@@ -908,17 +919,11 @@ function ArtifactPanel({ artifacts, currentIdx, onNavigate, onClose, width }: { 
           ? <DocumentViewer code={content} label={artifact.label} isEditing={editing} onChange={setDraft}/>
           : codeType
             ? (editing ? (
-                <div className="code-editor-wrap">
-                  <div className="code-disclaimer">⚠️ AI-generated — please review and test before using in production.</div>
-                  <Suspense fallback={<div className="code-editor-loading">Loading editor…</div>}>
-                    <CodeEditor code={draft} lang={artifact.lang} onChange={setDraft}/>
-                  </Suspense>
-                </div>
+                <Suspense fallback={<div className="code-editor-loading">Loading editor…</div>}>
+                  <CodeEditor code={draft} lang={artifact.lang} onChange={setDraft}/>
+                </Suspense>
               ) : (
-                <>
-                  <div className="code-disclaimer">⚠️ AI-generated — please review and test before using in production.</div>
-                  <CodeWithLineNumbers code={content} lang={artifact.lang}/>
-                </>
+                <CodeWithLineNumbers code={content} lang={artifact.lang}/>
               ))
             : <div className="artifact-prose prose-ada" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}/>
         }
@@ -998,11 +1003,11 @@ Required formatting:
 - Use numbered steps (1. step) for any sequence or process
 - Use tables (| col | col |) to compare options, products, or features side by side
 - Use **bold** for product names on first mention and for critical caveats
-- Never use em dashes, en dashes, or hyphens as sentence punctuation. Use commas, periods, or separate sentences instead. Hyphens are only acceptable inside compound words (e.g. "well-known") or code.
+- Do not use em dashes (—) or en dashes (–) anywhere in prose. Use a full stop, comma, or "and" instead. Hyphens are only allowed inside genuinely hyphenated words (e.g. "one-pager", "follow-up") or inside code.
 
 Example of a correctly formatted response:
 
-The team is spending time on manual transitions — this is a workflow automation gap.
+The team is spending time on manual transitions. This is a workflow automation gap.
 
 ## Recommended product
 
@@ -1036,19 +1041,21 @@ Executive / Decision Maker: ROI, productivity outcomes, governance, strategic al
 Support Engineer: Known issues, troubleshooting steps, workarounds, escalation guidance.
 
 PRODUCTS (only recommend those compatible with stated platform and deployment):
-- ScriptRunner for Jira (Cloud & Data Center) — automation, scripted workflows, custom listeners, JQL extensions
-- ScriptRunner for Confluence (Cloud & Data Center) — scripted macros, dynamic content, page automation
-- ScriptRunner for Bitbucket (Data Center) — repo-level scripting and hooks
-- ScriptRunner Connect — integration between Atlassian tools and external systems
-- ScriptRunner Migration Suite — Jira/Confluence migration tooling
-- ScriptRunner Enhanced Search — advanced search and filtering beyond native JQL
-- Mosaic (Cloud & Data Center) — formatting, layouts, branded templates for Confluence. Advanced Mosaic for complex design systems.
-- Upscale — everyday work apps for Jira, monday.com, and Slack (e.g. Hierarchy for Jira, task automation, notifications)
-- Hierarchy for Jira (part of Upscale) — multi-level issue hierarchy visualisation and Gantt-style timelines
-- Salable — all-in-one SaaS licensing platform for generating licenses, managing subscriptions, and payments
-- Brew Digital — full-service B2B digital agency: branding, websites, digital marketing, app development, and Confluence theming
+- ScriptRunner for Jira Cloud — https://www.scriptrunnerhq.com/atlassian-apps/jira/scriptrunner-for-jira-cloud — automation, scripted workflows, custom listeners, JQL extensions
+- ScriptRunner for Jira Data Center — https://www.scriptrunnerhq.com/atlassian-apps/jira/scriptrunner-for-jira-data-center — automation, scripted workflows, custom listeners, JQL extensions
+- ScriptRunner for Confluence Cloud — https://www.scriptrunnerhq.com/atlassian-apps/confluence/scriptrunner-for-confluence-cloud — scripted macros, dynamic content, page automation
+- ScriptRunner for Confluence Data Center — https://www.scriptrunnerhq.com/atlassian-apps/confluence/scriptrunner-for-confluence — scripted macros, dynamic content, page automation
+- ScriptRunner for Bitbucket (Data Center) — https://www.scriptrunnerhq.com/atlassian-apps/bitbucket/scriptrunner-for-bitbucket — repo-level scripting and hooks
+- ScriptRunner Connect — https://www.scriptrunnerhq.com/atlassian-apps/jira/scriptrunner-connect — integration between Atlassian tools and external systems
+- ScriptRunner Migration Suite — https://www.scriptrunnerhq.com/atlassian-apps/jira/scriptrunner-migration-suite — Jira/Confluence migration tooling
+- ScriptRunner Enhanced Search — https://www.scriptrunnerhq.com/atlassian-apps/jira/enhanced-search-for-jira — advanced search and filtering beyond native JQL
+- Mosaic (Cloud & Data Center) — https://www.kolekti.com/products/confluence/mosaic-content-formatting-macros — formatting, layouts, branded templates for Confluence. Advanced Mosaic for complex design systems.
+- Upscale — [URL not yet confirmed — leave as plain text, no link, until provided] — everyday work apps for Jira, monday.com, and Slack (e.g. Hierarchy for Jira, task automation, notifications)
+- Hierarchy for Jira (Cloud only) — [URL not yet confirmed — leave as plain text, no link, until provided] — multi-level issue hierarchy visualisation
+- Salable — [URL not yet confirmed — leave as plain text, no link, until provided] — all-in-one SaaS licensing platform for generating licenses, managing subscriptions, and payments
+- Brew Digital — [URL not yet confirmed — leave as plain text, no link, until provided] — full-service B2B digital agency: branding, websites, digital marketing, app development, and Confluence theming
 
-Always say "Mosaic" not "Kolekti". Never recommend tools outside The Adaptavist Group. Never fabricate capabilities.
+Always say "Mosaic" not "Kolekti". Never recommend tools outside The Adaptavist Group. Never fabricate capabilities or URLs. Only link to the URLs listed above, exactly as written.
 
 The user has indicated which Adaptavist products they currently use (see "Currently using" in their message). Take this into account, existing users may need integration, migration, or expansion advice rather than a fresh recommendation.
 
@@ -1059,6 +1066,11 @@ Contact & support portal: https://www.adaptavist.com/contact — use this link w
 - Directing someone to Adaptavist support or the partnerships team
 Always provide this URL rather than asking someone to "get in touch" generically.
 
+When suggesting the user book a call or demo about a specific product, link to that product family's booking page instead of the general contact page:
+- ScriptRunner-family products (ScriptRunner for Jira/Confluence/Bitbucket, ScriptRunner Connect, Migration Suite, Enhanced Search): https://www.scriptrunnerhq.com/book-a-demo
+- Mosaic / Kolekti products: https://www.kolekti.com/book-a-demo
+- Use the general contact page (https://www.adaptavist.com/contact) only when the suggestion isn't tied to one specific product family (e.g. a feature request, general support, or when recommending speaking to a CSM/SE without a specific product in focus).
+
 RESPONSE RULES:
 1. Start by acknowledging the problem in one brief sentence, then move directly to the recommendation. Never include a section that diagnoses or explains the root cause of the problem (e.g. a "What's likely driving this" section with bulleted causes). The user already understands their own situation.
 2. Bold the product name on first mention only
@@ -1068,6 +1080,11 @@ RESPONSE RULES:
 6. Never close with a generic sign-off
 7. When asking a clarifying question with multiple possible interpretations, do not write them as a prose bullet list. Instead, present each interpretation as a [[...]] clickable option, and do not include any additional [[...]] follow-up suggestions in that same response. The options ARE the interpretations, nothing else.
 8. Always exhaust every possible Adaptavist Group product fit before considering anything external. Only mention a non-Adaptavist tool as an absolute last resort, when no product in the PRODUCTS list could plausibly address the need, even partially or as a starting point, and say so explicitly (e.g. "this falls outside what any Adaptavist product currently covers"). Never suggest an external tool alongside an Adaptavist one as if they were equally weighted options.
+
+FACTUAL ACCURACY — do not presume:
+- Only state what the user has actually told you. Do not invent specifics, causes, or reasons the user has not mentioned (e.g. if they say "pages are messy", do not assume or state why they're messy or what "messy" specifically means, just refer to it as they described it).
+- Do not use language that implies blame or fault (e.g. avoid phrasing like "the team fails to..." or "X's reputation suffers because..."). Describe the situation neutrally and factually.
+- If you need more detail to make a good recommendation, ask a direct question rather than filling the gap with an assumption.
 
 SETUP GUIDES (only when explicitly asked): Numbered steps. Whenever a script is included, follow this exact structure, in order:
 
@@ -1139,6 +1156,7 @@ Rules for documents:
 - Always include a "Get in Touch" section with the contact URL
 - The # Title must be short and punchy, aim for under 8 words. Do not use a colon-plus-long-subtitle format (e.g. not "Taming Confluence: How to Build a Knowledge Base Your Team Actually Uses"). Prefer something like "Taming Confluence" on its own.
 - Never simply restate or transcribe the user's prompt back to them as the document's framing. Instead, think about what the reader of this document most needs to know to make a decision, and lead the introduction and "The Challenge" section with that synthesis, not a rephrasing of what was asked.
+- Whenever a document recommends a specific product, include a markdown link to that product directly beneath the section that names it, e.g. [Learn more about ScriptRunner Connect](https://www.scriptrunnerhq.com/atlassian-apps/jira/scriptrunner-connect). Use only the URLs listed in the PRODUCTS section above, never invent a URL.
 
 TITLING: Every script or document must open with a specific, descriptive title reflecting exactly what it does, not a generic label. For scripts, the Purpose: line in the header comment must name the actual function (e.g. "Auto-transition issues on sprint close for ScriptRunner Cloud", not "Automation Script"). For documents, the # Title must reflect the specific recommendation or challenge discussed (e.g. "Mosaic Rollout Plan for Messy Confluence Pages", not "One-Pager").
 
@@ -1302,6 +1320,7 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
 
   const lastAssistantIdx  = messages.reduce((acc,m,i) => m.role==='assistant' ? i : acc, -1)
   const artifactMsgIdxSet = useMemo(() => new Set(artifacts.map(a=>a.msgIndex)), [artifacts])
+  const codeArtifactMsgIdxSet = useMemo(() => new Set(artifacts.filter(a => isCode(a.lang)).map(a=>a.msgIndex)), [artifacts])
   const lastOptions = (!loading && lastAssistantIdx !== -1) ? parseMessage(messages[lastAssistantIdx].content).options : []
 
   return (
@@ -1325,6 +1344,7 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
                   {msg.role==='assistant' && <AdaAvatar/>}
                   {msg.role==='assistant'
                     ? <AdaMessage content={msg.content} hasArtifact={artifactMsgIdxSet.has(i)}
+                        isCodeArtifact={codeArtifactMsgIdxSet.has(i)}
                         onOpenArtifact={() => {
                           const idx = artifacts.findIndex(a => a.msgIndex === i)
                           if (idx !== -1) { setCurrentIdx(idx); setPanelOpen(true) }
