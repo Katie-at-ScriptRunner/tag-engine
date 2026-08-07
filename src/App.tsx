@@ -1220,12 +1220,17 @@ const FEEDBACK_CATEGORIES: { value: FeedbackCategory; label: string }[] = [
   { value: 'feature-request',  label: 'Feature request' },
 ]
 
+const FEEDBACK_TITLE_MAX_LENGTH = 80
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 interface FeedbackPayload {
+  title: string
   rating: FeedbackRating
   category: FeedbackCategory
   message: string
+  email: string
   context: {
-    role: Role
+    role: string
     product: string
     adaMessage?: string
   }
@@ -1266,27 +1271,33 @@ async function submitFeedback(payload: FeedbackPayload): Promise<string> {
 }
 
 function FeedbackPanel({ role, currentProducts, adaMessage, onClose }: {
-  role: Role; currentProducts: AdaptavistProduct[]; adaMessage?: string; onClose: () => void
+  role: Role | null; currentProducts: AdaptavistProduct[]; adaMessage?: string; onClose: () => void
 }) {
+  const [title,      setTitle]      = useState('')
   const [rating,     setRating]     = useState<FeedbackRating | null>(null)
   const [category,   setCategory]   = useState<FeedbackCategory | ''>('')
   const [message,    setMessage]    = useState('')
+  const [email,      setEmail]      = useState('')
+  const [noEmail,    setNoEmail]    = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error,      setError]      = useState<string | null>(null)
   const [ticketKey,  setTicketKey]  = useState<string | null>(null)
 
-  const ready = rating !== null && category !== '' && message.trim().length > 10
+  const emailReady = noEmail || EMAIL_RE.test(email.trim())
+  const ready = title.trim().length > 0 && rating !== null && category !== '' && message.trim().length > 10 && emailReady
 
   async function submit() {
     if (!ready || submitting || !rating || !category) return
     setSubmitting(true); setError(null)
     try {
       const key = await submitFeedback({
+        title: title.trim(),
         rating,
         category,
         message: message.trim(),
+        email: noEmail ? '' : email.trim(),
         context: {
-          role,
+          role: role ?? 'Not specified',
           product: currentProducts.length ? currentProducts.join(', ') : 'Not specified',
           ...(adaMessage ? { adaMessage } : {}),
         },
@@ -1341,11 +1352,30 @@ function FeedbackPanel({ role, currentProducts, adaMessage, onClose }: {
             </div>
 
             <div className="feedback-field">
+              <label className="selector-label" htmlFor="feedback-title">Brief overview</label>
+              <input id="feedback-title" type="text" className="feedback-text-input" disabled={submitting}
+                maxLength={FEEDBACK_TITLE_MAX_LENGTH} placeholder="One short sentence" value={title}
+                onChange={e => setTitle(e.target.value)}/>
+            </div>
+
+            <div className="feedback-field">
               <label className="selector-label" htmlFor="feedback-message">Message</label>
               <div className="card card-tight">
                 <textarea id="feedback-message" className="problem-textarea" rows={4} disabled={submitting}
                   placeholder="What's on your mind?" value={message} onChange={e => setMessage(e.target.value)}/>
               </div>
+            </div>
+
+            <div className="feedback-field">
+              <label className="selector-label" htmlFor="feedback-email">Your email</label>
+              <p className="feedback-field-hint">So I can reach out to gather more information about your feedback, or update you on any changes made.</p>
+              <input id="feedback-email" type="email" className="feedback-text-input" disabled={submitting || noEmail}
+                placeholder="you@company.com" value={email} onChange={e => setEmail(e.target.value)}/>
+              <label className="feedback-checkbox-row">
+                <input type="checkbox" checked={noEmail} disabled={submitting}
+                  onChange={e => setNoEmail(e.target.checked)}/>
+                No thanks
+              </label>
             </div>
 
             {error && (
@@ -1374,9 +1404,9 @@ const DEFAULT_PANEL_WIDTH = 480
 const MIN_CHAT_WIDTH      = 380
 const MIN_PANEL_WIDTH     = 320
 
-function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChangeRole }: {
+function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChangeRole, onFeedback }: {
   role: Role; currentProducts: AdaptavistProduct[]; initialProblem: string; onReset: () => void
-  onChangeRole: (v: Role) => void
+  onChangeRole: (v: Role) => void; onFeedback: (msgContent?: string) => void
 }) {
   const [messages,   setMessages]   = useState<Message[]>([])
   const [followUp,   setFollowUp]   = useState('')
@@ -1386,13 +1416,6 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH)
   const [currentIdx, setCurrentIdx] = useState(0)
   const [isMobile,   setIsMobile]   = useState(() => window.innerWidth < 768)
-  const [feedbackOpen,    setFeedbackOpen]    = useState(false)
-  const [feedbackMsgText, setFeedbackMsgText] = useState<string | undefined>(undefined)
-
-  function openFeedback(msgContent?: string) {
-    setFeedbackMsgText(msgContent)
-    setFeedbackOpen(true)
-  }
 
   const bottomRef     = useRef<HTMLDivElement>(null)
   const lastMsgRef    = useRef<HTMLDivElement>(null)
@@ -1509,7 +1532,7 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
             onChangeRole={handleChangeRole}/>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className="feedback-btn-topbar" onClick={() => openFeedback()}>
+          <button type="button" className="feedback-btn-topbar" onClick={() => onFeedback()}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             Feedback
           </button>
@@ -1531,7 +1554,7 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
                           const idx = artifacts.findIndex(a => a.msgIndex === i)
                           if (idx !== -1) { setCurrentIdx(idx); setPanelOpen(true) }
                         }}
-                        onFeedback={() => openFeedback(msg.content)}/>
+                        onFeedback={() => onFeedback(msg.content)}/>
                     : <div className="msg-bubble msg-bubble-user"><p className="msg-user-text">{msg.content}</p></div>
                   }
                 </div>
@@ -1571,11 +1594,6 @@ function ResultsScreen({ role, currentProducts, initialProblem, onReset, onChang
           </div>
         )}
       </div>
-
-      {feedbackOpen && (
-        <FeedbackPanel role={role} currentProducts={currentProducts} adaMessage={feedbackMsgText}
-          onClose={() => setFeedbackOpen(false)}/>
-      )}
     </div>
   )
 }
@@ -1587,11 +1605,33 @@ export default function App() {
   const [role,             setRole]            = useState<Role | null>(null)
   const [currentProducts, setCurrentProducts] = useState<AdaptavistProduct[]>([])
   const [problem,         setProblem]         = useState<string | null>(null)
+  const [feedbackOpen,    setFeedbackOpen]    = useState(false)
+  const [feedbackMsgText, setFeedbackMsgText] = useState<string | undefined>(undefined)
 
   function reset() { setRole(null); setCurrentProducts([]); setProblem(null); setScreen('platform') }
+  function openFeedback(msgContent?: string) {
+    setFeedbackMsgText(msgContent)
+    setFeedbackOpen(true)
+  }
 
-  if (screen==='platform') return <PlatformScreen onStart={(r,cp)=>{setRole(r);setCurrentProducts(cp);setScreen('problem')}}/>
-  if (screen==='problem')  return <ProblemScreen role={role!} currentProducts={currentProducts} onBack={()=>setScreen('platform')} onSubmit={p=>{setProblem(p);setScreen('results')}}/>
-  return <ResultsScreen role={role!} currentProducts={currentProducts} initialProblem={problem!} onReset={reset}
-    onChangeRole={r => setRole(r)}/>
+  return (
+    <>
+      {screen === 'platform' && <PlatformScreen onStart={(r,cp)=>{setRole(r);setCurrentProducts(cp);setScreen('problem')}}/>}
+      {screen === 'problem'  && <ProblemScreen role={role!} currentProducts={currentProducts} onBack={()=>setScreen('platform')} onSubmit={p=>{setProblem(p);setScreen('results')}}/>}
+      {screen === 'results'  && <ResultsScreen role={role!} currentProducts={currentProducts} initialProblem={problem!} onReset={reset}
+        onChangeRole={r => setRole(r)} onFeedback={openFeedback}/>}
+
+      {screen !== 'results' && (
+        <button type="button" className="feedback-fab" onClick={() => openFeedback()}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          Feedback
+        </button>
+      )}
+
+      {feedbackOpen && (
+        <FeedbackPanel role={role} currentProducts={currentProducts} adaMessage={feedbackMsgText}
+          onClose={() => setFeedbackOpen(false)}/>
+      )}
+    </>
+  )
 }
